@@ -1,6 +1,6 @@
 # PagerDuty Oncall Automation CLI
 
-![PagerDuty Logo](https://assets.pagerduty.com/images/logos/pagerduty-logo-green.svg)
+![PagerDuty Logo](PagerDuty-Logo.png)
 
 ## Overview
 This CLI tool automates the management of PagerDuty oncall rosters, making it easy to add or remove users, reassign incidents, and update schedules. It is designed for teams who want to streamline their PagerDuty operations and reduce manual effort.
