@@ -1,2 +1,21 @@
 config.yaml
 pagerduty_oncall_automation_wiki_atlassian.txt
+__pycache__/
+*.pyc
+*.pyo
+.DS_Store
+.env
+.vscode/
+# IDE and OS files
+.idea/
+*.swp
+*.swo
+# Test and log files
+*.log
+*.tmp
+# Jupyter and notebook files
+*.ipynb_checkpoints/
+# Python egg and build files
+dist/
+build/
+*.egg-info/

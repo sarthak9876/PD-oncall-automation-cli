@@ -122,8 +122,9 @@ def print_user_info(pd, user):
     if oncalls:
         for oncall in oncalls:
             ep = oncall['escalation_policy']
-            schedule = oncall['schedule']
-            print(f"✅ - {ep['summary']} - {schedule['summary']}")
+            schedule = oncall.get('schedule')
+            schedule_summary = schedule['summary'] if schedule and 'summary' in schedule else "(No schedule info)"
+            print(f"✅ - {ep['summary']} - {schedule_summary}")
     else:
         print("❌ The user is currently not on-call in any escalation policy/schedule")
     
@@ -218,13 +219,35 @@ def main():
             print(f"\nChecking current oncall status for {user_ref}:")
             oncalls = pd.get_user_oncalls(user['id'])
             if oncalls:
-                print(f"User {user_ref} is currently on-call in following Escalation policies:")
+                print(f"User {user_ref} is currently on-call in following Escalation policies/schedules:")
                 for oncall in oncalls:
                     ep = oncall['escalation_policy']
-                    schedule = oncall['schedule']
-                    print(f"  ⚠️  {ep['summary']} - {schedule['summary']}")
+                    schedule = oncall.get('schedule')
+                    schedule_summary = schedule['summary'] if schedule and 'summary' in schedule else "(No schedule info)"
+                    print(f"✅ - {ep['summary']} - {schedule_summary}")
             else:
                 print(f"User {user_ref} is not currently on-call in any Escalation Policy.")
+
+            # Remove user from all escalation policies and schedules
+            print(f"\nRemoving user {user_ref} from escalation policies and schedules...")
+            removed_from_any = False
+            # Collect all unique escalation policy IDs
+            policy_ids = set()
+            for oncall in oncalls:
+                ep = oncall.get('escalation_policy')
+                if ep and 'id' in ep:
+                    policy_ids.add(ep['id'])
+            for pid in policy_ids:
+                policy = pd.get_escalation_policy(pid)
+                changed = pd.remove_user_from_policy(policy, user['id'])
+                if changed:
+                    pd.update_escalation_policy(pid, policy)
+                    print(f"Removed user {user_ref} from escalation policy: {policy.get('summary', pid)} (ID: {pid})")
+                    removed_from_any = True
+                else:
+                    print(f"User {user_ref} was not present in escalation policy: {policy.get('summary', pid)} (ID: {pid})")
+            if not removed_from_any:
+                print(f"User {user_ref} was not present in any escalation policy.")
 
             # Check for active incidents
             print(f"\nChecking for active incidents for {user_ref}:")
@@ -246,16 +269,6 @@ def main():
                 print(f"No active incidents found for the user {user_ref}.")
 
             print(f"\nProceeding with user deletion for {user_ref}...")
-            # Remove from policies first (uncomment if needed)
-            # policy_ids = get_policy_ids(args, config, pd)
-            # for pid in policy_ids:
-            #     policy = pd.get_escalation_policy(pid)
-            #     changed = pd.remove_user_from_policy(policy, user['id'])
-            #     if changed:
-            #         pd.update_escalation_policy(pid, policy)
-            #         print(f"Removed user {user_ref} from policy {pid}.")
-
-            # Finally delete the user
             pd.delete_user(user['id'])
             print(f"Successfully deleted user {user.get('name')} ({user.get('email')})")
 
