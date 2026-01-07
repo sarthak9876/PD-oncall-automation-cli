@@ -1,2 +1,32 @@
-PyYAML
-requests
+# =========================================================================
+# PagerDuty On-Call Automation CLI - Requirements
+# =========================================================================
+# 
+# Production-ready dependencies for PagerDuty automation toolkit
+# Install with: pip install -r requirements.txt
+#
+# =========================================================================
+
+# Core HTTP Client Library
+# Used for all REST API v2 calls to PagerDuty
+# https://docs.python-requests.org/
+requests>=2.31.0,<3.0.0
+
+# YAML Configuration Parser
+# Used for loading config.yaml with API token and settings
+# https://pyyaml.org/
+PyYAML>=6.0,<7.0.0
+
+# =========================================================================
+# Optional Development Dependencies (commented out)
+# =========================================================================
+# 
+# Uncomment below for development/testing environments:
+#
+# pytest>=7.4.0              # Unit testing framework
+# pytest-cov>=4.1.0          # Code coverage reporting
+# black>=23.0.0              # Code formatter
+# flake8>=6.0.0              # Code linter
+# mypy>=1.5.0                # Static type checker
+#
+# =========================================================================
