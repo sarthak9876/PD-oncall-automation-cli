@@ -1,21 +1,87 @@
+# ========== SENSITIVE CONFIGURATION FILES ==========
+# CRITICAL: Contains API tokens and secrets - NEVER COMMIT
 config.yaml
-pagerduty_oncall_automation_wiki_atlassian.txt
-__pycache__/
-*.pyc
-*.pyo
-.DS_Store
 .env
-.vscode/
-# IDE and OS files
-.idea/
-*.swp
-*.swo
-# Test and log files
-*.log
-*.tmp
-# Jupyter and notebook files
-*.ipynb_checkpoints/
-# Python egg and build files
+.env.local
+.env.*.local
+
+# ========== DOCUMENTATION/WIKI FILES ==========
+pagerduty_oncall_automation_wiki_atlassian.txt
+pagerduty_oncall_automation_wiki_brief.txt
+pagerduty_oncall_automation_wiki.txt
+
+# ========== PYTHON ENVIRONMENT & DEPENDENCIES ==========
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+venv/
+ENV/
+.venv
+pagerduty-test/
+lib/
+lib64/
+*.egg-info/
 dist/
 build/
-*.egg-info/
+develop-eggs/
+eggs/
+.eggs/
+parts/
+sdist/
+var/
+wheels/
+pip-wheel-metadata/
+*.egg
+MANIFEST
+
+# ========== IDE AND EDITOR FILES ==========
+.vscode/
+.idea/
+*.sublime-project
+*.sublime-workspace
+*.swp
+*.swo
+*~
+
+# ========== OS-SPECIFIC FILES ==========
+.DS_Store
+Thumbs.db
+*.tmp
+*.bak
+*.backup
+
+# ========== LOGGING AND REPORTS ==========
+*.log
+logs/
+*.csv
+*_report_*.csv
+*.txt~
+inactive_users_report_*.csv
+user_activity_report_*.csv
+
+# ========== TERRAFORM & STATE FILES ==========
+terraform.tfstate
+terraform.tfstate.backup
+CACHEDIR.TAG
+
+# ========== JUPYTER NOTEBOOKS & CACHE ==========
+*.ipynb_checkpoints/
+.jupyter_cache/
+.pytest_cache/
+
+# ========== TEST & COVERAGE ==========
+.coverage
+htmlcov/
+.pytest_cache/
+
+# ========== DATABASE FILES ==========
+*.db
+*.sqlite
+*.sqlite3
+
+# ========== CACHE FILES ==========
+.cache/
+*.cache

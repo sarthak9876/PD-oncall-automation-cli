@@ -1,21 +1,31 @@
+"""
+PagerDuty API Wrapper Class
+=============================
+Comprehensive wrapper for PagerDuty REST API v2, providing methods for:
+  - User Management (create, get, delete)
+  - Escalation Policy Management (add/remove users, update levels)
+  - Schedule Management (add users, override shifts)
+  - Incident Management (acknowledge, resolve, reassign)
+  - Team Management (add users)
+  - On-call Status Queries
+
+All API calls use standard HTTP methods (GET, POST, PUT, DELETE).
+Authentication: Bearer token (PAGERDUTY_API_TOKEN)
+API Base: https://api.pagerduty.com
+API Version: v2
+"""
+
 import requests
 import time
 
 class PagerDutyAPI:
-    def acknowledge_incident(self, incident_id):
-        url = f"{self.BASE_URL}/incidents/{incident_id}"
-        data = {
-            "incident": {
-                "type": "incident",
-                "status": "acknowledged"
-            }
-        }
-        resp = requests.put(url, headers=self.headers, json=data)
-        resp.raise_for_status()
-        return resp.json().get('incident')
+    """
+    PagerDuty API client for managing incidents, users, schedules, and policies.
+    """
     BASE_URL = "https://api.pagerduty.com"
 
     def __init__(self, token):
+        """Initialize API client with authentication token."""
         self.token = token
         self.headers = {
             "Authorization": f"Token token={token}",
@@ -23,7 +33,15 @@ class PagerDutyAPI:
             "Content-Type": "application/json",
         }
 
+    # ========================================================================
+    # USER MANAGEMENT METHODS
+    # ========================================================================
+
     def get_user_by_email(self, email):
+        """
+        Retrieve user by email address.
+        Returns first matching user or None if not found.
+        """
         url = f"{self.BASE_URL}/users"
         params = {"query": email, "limit": 1}
         resp = requests.get(url, headers=self.headers, params=params)
@@ -32,6 +50,10 @@ class PagerDutyAPI:
         return users[0] if users else None
 
     def get_user_by_id(self, user_id):
+        """
+        Retrieve user by PagerDuty user ID.
+        Returns user object or None if not found.
+        """
         url = f"{self.BASE_URL}/users/{user_id}"
         resp = requests.get(url, headers=self.headers)
         if resp.status_code == 404:
@@ -40,6 +62,17 @@ class PagerDutyAPI:
         return resp.json().get("user")
 
     def create_user(self, email, name, role):
+        """
+        Create a new PagerDuty user.
+        
+        Args:
+            email: User email (unique identifier)
+            name: Full name
+            role: One of [admin, limited_user, user, restricted_access_user, read_only_access_user]
+        
+        Returns:
+            User object with ID, name, email
+        """
         url = f"{self.BASE_URL}/users"
         data = {
             "user": {
@@ -47,13 +80,57 @@ class PagerDutyAPI:
                 "name": name,
                 "email": email,
                 "role": role,
+                "time_zone": "Asia/Kolkata"
             }
         }
         resp = requests.post(url, headers=self.headers, json=data)
-        resp.raise_for_status()
+        if resp.status_code != 201:
+            print(f"Error creating user {email}: {resp.status_code}")
+            print(f"Response: {resp.text}")
+            resp.raise_for_status()
         return resp.json()["user"]
 
+    def delete_user(self, user_id):
+        """
+        Safely delete a user from PagerDuty.
+        
+        Multi-stage deletion process:
+          Stage 1: Override user in all schedules (replace with next on-call)
+          Stage 2: Override user in all escalation policies
+          Stage 3: Verify user removed from schedules
+          Stage 4: Verify user removed from escalation policies
+          Stage 5: Delete user account
+        
+        This ensures no orphaned on-call assignments or incidents remain.
+        """
+        print(f"[Stage 1] Overriding user in all schedules...")
+        self.override_user_in_all_schedules(user_id, avoid_user_ids=[user_id])
+        print(f"[Stage 2] Overriding user in all escalation policies...")
+        self.override_user_in_all_escalation_policies(user_id, avoid_user_ids=[user_id])
+        print(f"[Stage 3] Checking if user is still present in any schedule...")
+        if self.is_user_in_any_schedule(user_id):
+            print(f"Cannot delete user {user_id}: still present in one or more schedules. Remove all references before deletion.")
+            return False
+        print(f"[Stage 4] Checking if user is still present in any escalation policy...")
+        if self.is_user_in_any_escalation_policy(user_id):
+            print(f"Cannot delete user {user_id}: still present in one or more escalation policies. Remove all references before deletion.")
+            return False
+        print(f"[Stage 5] Deleting user from PagerDuty...")
+        url = f"{self.BASE_URL}/users/{user_id}"
+        resp = requests.delete(url, headers=self.headers)
+        resp.raise_for_status()
+        print(f"User {user_id} deleted successfully.")
+        return True
+
     def get_user_oncalls(self, user_id):
+        """
+        Get all on-call shifts for a user in all escalation policies/schedules.
+        
+        Returns list of oncall objects with:
+          - escalation_policy: Policy details
+          - schedule: Schedule details (if applicable)
+          - start/end: Shift times
+        """
         url = f"{self.BASE_URL}/oncalls"
         params = {
             "time_zone": "Asia/Kolkata",
@@ -64,7 +141,138 @@ class PagerDutyAPI:
         resp.raise_for_status()
         return resp.json().get("oncalls", [])
 
+    # ========================================================================
+    # INCIDENT MANAGEMENT METHODS
+    # ========================================================================
+
+    def list_user_incidents(self, user_id):
+        """
+        Get all triggered/acknowledged incidents assigned to a user.
+        
+        Returns list of incident objects with:
+          - id: Incident ID
+          - title: Incident summary
+          - status: 'triggered' or 'acknowledged'
+          - escalation_policy: Policy managing this incident
+        """
+        url = f"{self.BASE_URL}/incidents"
+        params = {'user_ids[]': user_id, 'statuses[]': ['triggered', 'acknowledged']}
+        resp = requests.get(url, headers=self.headers, params=params)
+        resp.raise_for_status()
+        return resp.json().get('incidents', [])
+
+    def acknowledge_incident(self, incident_id):
+        """
+        Acknowledge an incident (change status from 'triggered' to 'acknowledged').
+        
+        Used in auto-acknowledge workflows to prevent escalation.
+        """
+        url = f"{self.BASE_URL}/incidents/{incident_id}"
+        data = {
+            "incident": {
+                "type": "incident",
+                "status": "acknowledged"
+            }
+        }
+        resp = requests.put(url, headers=self.headers, json=data)
+        resp.raise_for_status()
+        return resp.json().get('incident')
+
+    def resolve_incident(self, incident_id):
+        """
+        Resolve an incident (change status to 'resolved').
+        
+        Used to close incidents that are no longer active.
+        """
+        url = f"{self.BASE_URL}/incidents/{incident_id}"
+        data = {
+            "incident": {
+                "type": "incident",
+                "status": "resolved"
+            }
+        }
+        resp = requests.put(url, headers=self.headers, json=data)
+        resp.raise_for_status()
+        return resp.json().get('incident')
+
+    def reassign_incident(self, incident_id, user_id):
+        """
+        Reassign an incident to a specific user.
+        
+        Args:
+            incident_id: Incident to reassign
+            user_id: Target user for assignment
+        """
+        url = f"{self.BASE_URL}/incidents/{incident_id}"
+        data = {
+            "incident": {
+                "type": "incident",
+                "assignments": [{"assignee": {"type": "user_reference", "id": user_id}}]
+            }
+        }
+        resp = requests.put(url, headers=self.headers, json=data)
+        resp.raise_for_status()
+        return resp.json().get('incident')
+
+    def reassign_incident_to_policy(self, incident_id, policy_id):
+        """
+        Reassign an incident to an escalation policy for round-robin distribution.
+        
+        When reassigned to a policy, PagerDuty automatically distributes the incident
+        across all on-call users in the policy using its round-robin logic.
+        
+        This is preferred over reassigning to a specific user as it ensures:
+        - Load balancing across team members
+        - Automatic escalation if current user doesn't acknowledge
+        - Better incident distribution
+        
+        Args:
+            incident_id: Incident to reassign
+            policy_id: Escalation policy for round-robin assignment
+        """
+        url = f"{self.BASE_URL}/incidents/{incident_id}"
+        data = {
+            "incident": {
+                "type": "incident",
+                "escalation_policy": {
+                    "id": policy_id,
+                    "type": "escalation_policy_reference"
+                }
+            }
+        }
+        resp = requests.put(url, headers=self.headers, json=data)
+        resp.raise_for_status()
+        return resp.json().get('incident')
+
+    # ========================================================================
+    # ESCALATION POLICY MANAGEMENT METHODS
+    # ========================================================================
+
     def list_escalation_policies(self):
+        """
+        Fetch all escalation policies in the account.
+        
+        Handles pagination automatically (fetches all policies).
+        
+        Returns list of policy objects with:
+          - id: Policy ID
+          - summary: Policy name
+          - escalation_rules: List of escalation levels
+        """
+        policies = []
+        offset = 0
+        limit = 100
+        while True:
+            url = f"{self.BASE_URL}/escalation_policies"
+            params = {"offset": offset, "limit": limit}
+            resp = requests.get(url, headers=self.headers, params=params)
+            resp.raise_for_status()
+            batch = resp.json().get("escalation_policies", [])
+            policies.extend(batch)
+            if len(batch) < limit:
+                break
+            offset += limit
+        return policies
         policies = []
         offset = 0
         limit = 100
@@ -140,22 +348,204 @@ class PagerDutyAPI:
         resp.raise_for_status()
         return resp.json().get("users", [])
 
+    def get_team_by_name(self, team_name):
+        """
+        Get team details by name.
+        """
+        teams = self.list_teams()
+        for team in teams:
+            if team.get('summary', '').lower() == team_name.lower():
+                return team
+        return None
+
+    def get_team_by_id(self, team_id):
+        """
+        Get team details by ID.
+        """
+        url = f"{self.BASE_URL}/teams/{team_id}"
+        resp = requests.get(url, headers=self.headers)
+        if resp.status_code == 404:
+            return None
+        resp.raise_for_status()
+        return resp.json().get("team")
+
+    def add_user_to_team(self, team_id, user_id):
+        """
+        Add a user to a team.
+        Uses the teams/{id}/users endpoint with proper payload.
+        """
+        url = f"{self.BASE_URL}/teams/{team_id}/users"
+        data = {
+            "users": [
+                {
+                    "id": user_id,
+                    "type": "user_reference"
+                }
+            ]
+        }
+        try:
+            resp = requests.post(url, headers=self.headers, json=data)
+            
+            if resp.status_code == 400:
+                # User might already be in team or invalid team
+                error_msg = resp.json().get('error', {}).get('message', '')
+                if 'already' in error_msg.lower():
+                    return False
+                print(f"Error details: {error_msg}")
+                return False
+            
+            if resp.status_code == 404:
+                print(f"Team ID {team_id} not found or endpoint not accessible")
+                return False
+            
+            if resp.status_code == 201 or resp.status_code == 200:
+                return True
+            
+            resp.raise_for_status()
+            return True
+        except Exception as e:
+            print(f"Failed to add user to team: {str(e)}")
+            return False
+
     # For "add to policy" and "remove from policy" logic:
-    def add_user_to_policy(self, policy, user_id, role, as_first=False):
+    def add_user_to_policy(self, policy, user_id, role, rule_index=None):
+        """
+        Add user to a specific escalation rule (level) in a policy.
+        If rule_index is None, adds to the last rule (bottom).
+        """
         if not policy['escalation_rules']:
             print("No escalation rules on policy.")
             return False
+        
+        # Use specified rule or default to last rule
+        if rule_index is None:
+            rule_index = len(policy['escalation_rules']) - 1
+        elif rule_index >= len(policy['escalation_rules']):
+            print(f"Rule index {rule_index} out of range. Policy has {len(policy['escalation_rules'])} rules.")
+            return False
+        
         target = {"id": user_id, "type": "user_reference"}
-        # Insert at L1 (top) for "user"/"limited_user", else at end
-        if as_first:
-            if target not in policy['escalation_rules'][0]['escalation_targets']:
-                policy['escalation_rules'][0]['escalation_targets'].insert(0, target)
-                return True
-        else:
-            if target not in policy['escalation_rules'][-1]['escalation_targets']:
-                policy['escalation_rules'][-1]['escalation_targets'].append(target)
-                return True
+        targets = policy['escalation_rules'][rule_index].get('targets', [])
+        
+        if target not in targets:
+            targets.append(target)
+            policy['escalation_rules'][rule_index]['targets'] = targets
+            return True
         return False
+
+    def list_escalation_rules(self, policy_id):
+        """
+        List all escalation rules (levels) in a policy with their details.
+        """
+        policy = self.get_escalation_policy(policy_id)
+        rules = []
+        for idx, rule in enumerate(policy.get('escalation_rules', [])):
+            rule_info = {
+                'index': idx,
+                'id': rule.get('id'),
+                'escalation_delay_in_minutes': rule.get('escalation_delay_in_minutes'),
+                'targets': rule.get('targets', [])
+            }
+            rules.append(rule_info)
+        return rules
+
+    def list_schedules(self):
+        """
+        List all schedules in the account.
+        """
+        schedules = []
+        offset = 0
+        limit = 100
+        while True:
+            url = f"{self.BASE_URL}/schedules"
+            params = {"offset": offset, "limit": limit}
+            resp = requests.get(url, headers=self.headers, params=params)
+            resp.raise_for_status()
+            batch = resp.json().get("schedules", [])
+            schedules.extend(batch)
+            if len(batch) < limit:
+                break
+            offset += limit
+        return schedules
+
+    def get_schedule_by_name(self, schedule_name):
+        """
+        Get schedule details by name.
+        """
+        schedules = self.list_schedules()
+        for sched in schedules:
+            if sched.get('summary', '').lower() == schedule_name.lower():
+                # Fetch full schedule with layers
+                url = f"{self.BASE_URL}/schedules/{sched['id']}"
+                resp = requests.get(url, headers=self.headers)
+                resp.raise_for_status()
+                return resp.json().get('schedule')
+        return None
+
+    def add_user_to_schedule_layer(self, schedule_id, user_id, start_time=None, end_time=None):
+        """
+        Add user to a schedule layer with optional time window (ISO 8601 format).
+        If no time window, adds to the entire schedule layer.
+        start_time: ISO 8601 format (e.g., "2025-11-27T06:00:00+05:30")
+        end_time: ISO 8601 format (e.g., "2025-11-27T15:00:00+05:30")
+        """
+        url = f"{self.BASE_URL}/schedules/{schedule_id}"
+        resp = requests.get(url, headers=self.headers)
+        resp.raise_for_status()
+        schedule = resp.json().get('schedule', {})
+        
+        layers = schedule.get('schedule_layers', [])
+        if not layers:
+            print(f"Schedule {schedule_id} has no layers.")
+            return False
+        
+        # Add user to the first (or only) layer
+        layer = layers[0]
+        
+        # Create a new rendered schedule entry for this user
+        user_entry = {
+            "user": {
+                "id": user_id,
+                "type": "user_reference"
+            }
+        }
+        
+        if start_time and end_time:
+            user_entry["start"] = start_time
+            user_entry["end"] = end_time
+        
+        # Add to rendered schedule entries (this is how PagerDuty handles time-based assignments)
+        if 'rendered_schedule_entries' not in layer:
+            layer['rendered_schedule_entries'] = []
+        
+        layer['rendered_schedule_entries'].append(user_entry)
+        
+        # Update the schedule
+        update_data = {'schedule': schedule}
+        update_resp = requests.put(url, headers=self.headers, json=update_data)
+        
+        if update_resp.status_code != 200:
+            print(f"Error adding user to schedule: {update_resp.status_code}")
+            print(f"Response: {update_resp.text}")
+            return False
+        
+        return True
+
+    def list_schedule_users(self, schedule_id):
+        """
+        List all users assigned to a schedule.
+        """
+        url = f"{self.BASE_URL}/schedules/{schedule_id}"
+        resp = requests.get(url, headers=self.headers)
+        resp.raise_for_status()
+        schedule = resp.json().get('schedule', {})
+        
+        users = set()
+        for layer in schedule.get('schedule_layers', []):
+            for user_ref in layer.get('users', []):
+                users.add(user_ref.get('id'))
+        
+        return list(users)
 
     def remove_user_from_policy(self, policy, user_id):
         changed = False
@@ -169,11 +559,31 @@ class PagerDutyAPI:
         return changed
 
     def reassign_incident(self, incident_id, user_id):
+        """Reassign incident to a specific user."""
         url = f"{self.BASE_URL}/incidents/{incident_id}"
         data = {
             "incident": {
                 "type": "incident",
                 "assignments": [{"assignee": {"type": "user_reference", "id": user_id}}]
+            }
+        }
+        resp = requests.put(url, headers=self.headers, json=data)
+        resp.raise_for_status()
+        return resp.json().get('incident')
+
+    def reassign_incident_to_policy(self, incident_id, policy_id):
+        """Reassign incident to an escalation policy for round-robin distribution.
+        When reassigned to a policy, PagerDuty automatically distributes the incident
+        across all users in the policy using round-robin logic.
+        """
+        url = f"{self.BASE_URL}/incidents/{incident_id}"
+        data = {
+            "incident": {
+                "type": "incident",
+                "escalation_policy": {
+                    "id": policy_id,
+                    "type": "escalation_policy_reference"
+                }
             }
         }
         resp = requests.put(url, headers=self.headers, json=data)
@@ -284,10 +694,7 @@ class PagerDutyAPI:
         return True
 
     def is_user_in_any_schedule(self, user_id):
-        url = f"{self.BASE_URL}/schedules"
-        resp = requests.get(url, headers=self.headers)
-        resp.raise_for_status()
-        schedules = resp.json().get("schedules", [])
+        schedules = self.list_schedules()  # This handles pagination properly
         for sched in schedules:
             sched_id = sched['id']
             sched_url = f"{self.BASE_URL}/schedules/{sched_id}"
@@ -329,4 +736,5 @@ class PagerDutyAPI:
         resp.raise_for_status()
         print(f"User {user_id} deleted successfully.")
         return True
+
 
